@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-import re  # <-- INI SUDAH DITAMBAHKAN AGAR TIDAK NAMEERROR LAGI
+import re
 import tempfile
 import zipfile
 from pathlib import Path
@@ -197,7 +197,8 @@ if uploaded_file is not None:
                     else:
                         checklist_items.sort(key=lambda x: (x['location'].lower(), x['work'].lower()))
                         
-                        output_pdf = temp_dir_path / f"Report_{uploaded_file.stem}.pdf"
+                        # REVISI DI SINI: Menggunakan unit_name secara aman tanpa .stem
+                        output_pdf = temp_dir_path / f"Report_{unit_name}.pdf"
                         generate_pdf(output_pdf, checklist_items, unit_name)
                         
                         with open(output_pdf, "rb") as f:
@@ -207,7 +208,7 @@ if uploaded_file is not None:
                         st.download_button(
                             label="📥 Unduh Laporan PDF Hasil",
                             data=pdf_bytes,
-                            file_name=f"Report_{uploaded_file.stem}.pdf",
+                            file_name=f"Report_{unit_name}.pdf",
                             mime="application/pdf",
                             use_container_width=True
                         )
