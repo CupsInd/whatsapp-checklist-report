@@ -23,8 +23,8 @@ def parse_chat_file(txt_file, temp_dir_path):
     with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    # Regex untuk menangkap nama file gambar WhatsApp (.jpg)
-    img_pattern = re.compile(r"([\w-]+\.jpg)")
+    # REVISI MUTAKHIR: Regex diperkuat agar mendukung .jpg, .JPG, .jpeg, .JPEG secara case-insensitive
+    img_pattern = re.compile(r"([\w-]+\.(?:jpg|jpeg))", re.IGNORECASE)
 
     for i, line in enumerate(lines):
         match = img_pattern.search(line)
@@ -45,7 +45,17 @@ def parse_chat_file(txt_file, temp_dir_path):
                 location = "Lainnya"
                 work = caption.strip()
             
+            # Cari file gambar asli secara case-insensitive di dalam folder ekstraksi
             img_path = Path(temp_dir_path) / img_name
+            
+            # Cari cadangan jika nama file di text dan file fisik berbeda huruf besar/kecilnya
+            if not img_path.exists():
+                for file_in_temp in Path(temp_dir_path).iterdir():
+                    if file_in_temp.name.lower() == img_name.lower():
+                        img_path = file_in_temp
+                        img_name = file_in_temp.name
+                        break
+
             if img_path.exists():
                 checklist_items.append({
                     'image_name': img_name,
@@ -160,7 +170,7 @@ def generate_pdf(output_pdf_path, checklist_items, unit_name):
 
     doc.build(story)
 
-# --- TAMPILAN ANTARMUKA WEB (UI) STRAMLIT ---
+# --- TAMPILAN ANTARMUKA WEB (UI) ---
 st.title("📝 WhatsApp Checklist Report Generator")
 st.write("Ekstrak chat export WhatsApp (.zip) menjadi laporan PDF resmi secara instan.")
 
@@ -175,11 +185,9 @@ if uploaded_file is not None:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_dir_path = Path(temp_dir)
                 
-                # Ekstraksi berkas unggahan
                 with zipfile.ZipFile(uploaded_file, 'r') as zip_ref:
                     zip_ref.extractall(temp_dir_path)
                 
-                # Cari file chat .txt
                 txt_files = list(temp_dir_path.glob("*.txt"))
                 if not txt_files:
                     st.error("Gagal: Tidak ditemukan file teks chat (.txt) di dalam ZIP WhatsApp Anda.")
@@ -187,7 +195,7 @@ if uploaded_file is not None:
                     checklist_items = parse_chat_file(txt_files[0], temp_dir_path)
                     
                     if not checklist_items:
-                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau deskripsi pekerjaan yang valid.")
+                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau deskripsi pekerjaan yang valid di dalam berkas ini. Periksa format penulisan teks chat Anda.")
                     else:
                         # Urutkan A-Z lokasi
                         checklist_items.sort(key=lambda x: (x['location'].lower(), x['work'].lower()))
@@ -195,7 +203,6 @@ if uploaded_file is not None:
                         output_pdf = temp_dir_path / f"Report_{uploaded_file.stem}.pdf"
                         generate_pdf(output_pdf, checklist_items, unit_name)
                         
-                        # Baca data biner PDF untuk tombol unduh
                         with open(output_pdf, "rb") as f:
                             pdf_bytes = f.read()
                             
