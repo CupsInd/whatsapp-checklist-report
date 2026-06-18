@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-import re
+import re  # <-- INI SUDAH DITAMBAHKAN AGAR TIDAK NAMEERROR LAGI
 import tempfile
 import zipfile
 from pathlib import Path
@@ -23,7 +23,7 @@ def parse_chat_file(txt_file, temp_dir_path):
     with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    # REVISI MUTAKHIR: Regex diperkuat agar mendukung .jpg, .JPG, .jpeg, .JPEG secara case-insensitive
+    # Regex untuk mendukung .jpg, .JPG, .jpeg, .JPEG secara case-insensitive
     img_pattern = re.compile(r"([\w-]+\.(?:jpg|jpeg))", re.IGNORECASE)
 
     for i, line in enumerate(lines):
@@ -45,10 +45,8 @@ def parse_chat_file(txt_file, temp_dir_path):
                 location = "Lainnya"
                 work = caption.strip()
             
-            # Cari file gambar asli secara case-insensitive di dalam folder ekstraksi
             img_path = Path(temp_dir_path) / img_name
             
-            # Cari cadangan jika nama file di text dan file fisik berbeda huruf besar/kecilnya
             if not img_path.exists():
                 for file_in_temp in Path(temp_dir_path).iterdir():
                     if file_in_temp.name.lower() == img_name.lower():
@@ -170,7 +168,7 @@ def generate_pdf(output_pdf_path, checklist_items, unit_name):
 
     doc.build(story)
 
-# --- TAMPILAN ANTARMUKA WEB (UI) ---
+# --- TAMPILAN ANTARMUKA WEB ---
 st.title("📝 WhatsApp Checklist Report Generator")
 st.write("Ekstrak chat export WhatsApp (.zip) menjadi laporan PDF resmi secara instan.")
 
@@ -195,9 +193,8 @@ if uploaded_file is not None:
                     checklist_items = parse_chat_file(txt_files[0], temp_dir_path)
                     
                     if not checklist_items:
-                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau deskripsi pekerjaan yang valid di dalam berkas ini. Periksa format penulisan teks chat Anda.")
+                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau deskripsi pekerjaan yang valid di dalam berkas ini.")
                     else:
-                        # Urutkan A-Z lokasi
                         checklist_items.sort(key=lambda x: (x['location'].lower(), x['work'].lower()))
                         
                         output_pdf = temp_dir_path / f"Report_{uploaded_file.stem}.pdf"
