@@ -18,60 +18,87 @@ from reportlab.platypus import (
 st.set_page_config(page_title="WhatsApp Checklist Report Generator", page_icon="📝", layout="centered")
 
 def parse_chat_file(txt_file, temp_dir_path):
-    """Memilah teks chat dari berkas txt dan menghindari duplikasi gambar."""
+    """
+    STRATEGI BARU: 
+    Hanya memproses baris chat yang file foto fisiknya nyata-nyata ADA di dalam ZIP.
+    Jika user sudah menghapus fotonya secara manual, teks chat-nya otomatis diabaikan.
+    """
     checklist_items = []
-    seen_images = set() # Menghindari duplikasi gambar ganda
+    seen_images = set()
+    
+    # 1. Daftarkan semua file fisik yang benar-benar ada di folder ekstraksi (case-insensitive)
+    existing_files = {f.name.lower(): f.name for f in Path(temp_dir_path).iterdir() if f.is_file()}
     
     with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
     img_pattern = re.compile(r"([\w-]+\.(?:jpg|jpeg))", re.IGNORECASE)
+    timestamp_pattern = re.compile(r"^\d{2}/\d{2}/\d{2}\s+\d{2}[.:]\d{2}\s+-")
 
-    for i, line in enumerate(lines):
-        match = img_pattern.search(line)
-        if match:
-            img_name = match.group(1)
-            
-            # Jika gambar sudah pernah diproses, lewati agar tidak dobel
-            if img_name.lower() in seen_images:
-                continue
-                
-            caption = "Lainnya : Tanpa Deskripsi"
-            
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                if next_line and not re.search(r"\d{2}/\d{2}/\d{2}|\d{1,2}:\d{2}", next_line):
-                    caption = next_line
-            
-            if ":" in caption:
-                parts = caption.split(":", 1)
-                location = parts[0].strip()
-                work = parts[1].strip()
-            else:
-                location = "Lainnya"
-                work = caption.strip()
-            
-            img_path = Path(temp_dir_path) / img_name
-            if not img_path.exists():
-                for file_in_temp in Path(temp_dir_path).iterdir():
-                    if file_in_temp.name.lower() == img_name.lower():
-                        img_path = file_in_temp
-                        img_name = file_in_temp.name
-                        break
+    current_img = None
+    current_caption_lines = []
 
-            if img_path.exists():
+    def save_current_item():
+        """Menyimpan item hanya jika file fotonya lolos sensor (ada fisiknya)."""
+        nonlocal current_img, current_caption_lines
+        if current_img:
+            img_lower = current_img.lower()
+            
+            # FILTER VALIDASI UTAMA: Cek apakah file fotonya ada di daftar berkas ZIP Anda
+            if img_lower in existing_files and img_lower not in seen_images:
+                # Ambil nama file dengan penulisan huruf besar/kecil yang asli dari folder
+                actual_filename = existing_files[img_lower]
+                img_path = Path(temp_dir_path) / actual_filename
+
+                full_caption = " ".join(current_caption_lines).strip()
+                if not full_caption:
+                    full_caption = "Lainnya : Tanpa Deskripsi"
+
+                if ":" in full_caption:
+                    parts = full_caption.split(":", 1)
+                    location = parts[0].strip()
+                    work = parts[1].strip()
+                else:
+                    location = "Lainnya"
+                    work = full_caption.strip()
+
                 checklist_items.append({
-                    'image_name': img_name,
+                    'image_name': actual_filename,
                     'image_path': img_path,
                     'location': location if location else "Lainnya",
                     'work': work if work else "Tanpa Deskripsi"
                 })
-                seen_images.add(img_name.lower())
+                seen_images.add(img_lower)
+
+    for line in lines:
+        clean_line = line.replace('\u200e', '').replace('\u200f', '').strip()
+        if not clean_line:
+            continue
+
+        img_match = img_pattern.search(clean_line)
+        if img_match:
+            # Simpan antrean gambar sebelumnya sebelum membuka gambar baru
+            save_current_item()
+            current_img = img_match.group(1)
+            current_caption_lines = []
+        else:
+            if current_img:
+                # Bersihkan teks dari nama pengirim jika terikut
+                if " - " in clean_line and ":" in clean_line:
+                    if timestamp_pattern.match(clean_line):
+                        parts = clean_line.split(":", 2)
+                        if len(parts) >= 3:
+                            clean_line = parts[2].strip()
                 
+                if clean_line and not "file terlampir" in clean_line.lower():
+                    current_caption_lines.append(clean_line)
+
+    # Simpan item terakhir di ujung file
+    save_current_item()
     return checklist_items
 
 def generate_pdf(output_pdf_path, checklist_items, unit_name):
-    """Membuat dokumen PDF Laporan dengan susunan grid 4 foto per halaman."""
+    """Membuat dokumen PDF Laporan dengan susunan grid rapi 4 foto per halaman."""
     margin = 28.35
     doc = SimpleDocTemplate(
         str(output_pdf_path),
@@ -137,7 +164,6 @@ def generate_pdf(output_pdf_path, checklist_items, unit_name):
     story.append(Paragraph("DOKUMENTASI FOTO LAPANGAN", h2_style))
     story.append(Spacer(1, 10))
     
-    # Kelompokkan item foto menjadi paket berisi maksimal 4 item per halaman
     for i in range(0, len(checklist_items), 4):
         page_items = checklist_items[i:i+4]
         grid_cells = []
@@ -150,10 +176,9 @@ def generate_pdf(output_pdf_path, checklist_items, unit_name):
             except:
                 aspect_ratio = 1.0
 
-            # Dimensi maksimal sel foto agar pas 4 kotak di kertas A4
             img_display_w = 240
             img_display_h = img_display_w * aspect_ratio
-            if img_display_h > 240: # Batasi tinggi agar tidak meluber ke halaman baru
+            if img_display_h > 240:
                 img_display_h = 240
                 img_display_w = img_display_h / aspect_ratio
 
@@ -169,11 +194,9 @@ def generate_pdf(output_pdf_path, checklist_items, unit_name):
             ]
             grid_cells.append(caption_block)
             
-        # Isih kotak kosong jika jumlah foto di halaman terakhir kurang dari 4
         while len(grid_cells) < 4:
             grid_cells.append("")
             
-        # Susun matriks tabel grid 2 baris x 2 kolom
         grid_data = [
             [grid_cells[0], grid_cells[1]],
             [grid_cells[2], grid_cells[3]]
@@ -190,8 +213,6 @@ def generate_pdf(output_pdf_path, checklist_items, unit_name):
         ]))
         
         story.append(KeepTogether(grid_table))
-        
-        # Tambahkan page break antar halaman foto, kecuali untuk kelompok terakhir
         if i + 4 < len(checklist_items):
             story.append(PageBreak())
 
@@ -222,9 +243,9 @@ if uploaded_file is not None:
                     checklist_items = parse_chat_file(txt_files[0], temp_dir_path)
                     
                     if not checklist_items:
-                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau deskripsi pekerjaan.")
+                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau berkas foto fisik Anda kosong.")
                     else:
-                        # Urutkan A-Z lokasi
+                        # Urutkan A-Z berdasarkan lokasi
                         checklist_items.sort(key=lambda x: (x['location'].lower(), x['work'].lower()))
                         
                         output_pdf = temp_dir_path / f"Report_{unit_name}.pdf"
@@ -233,9 +254,9 @@ if uploaded_file is not None:
                         with open(output_pdf, "rb") as f:
                             pdf_bytes = f.read()
                             
-                        st.success("🎉 Laporan berhasil dikonstruksi!")
+                        st.success(f"🎉 Sukses! Berhasil menyusun {len(checklist_items)} item ceklis berdasarkan foto fisik aktif Anda.")
                         st.download_button(
-                            label="📥 Unduh Laporan PDF Hasil (4 Foto/Halaman)",
+                            label=f"📥 Unduh Laporan PDF Hasil ({len(checklist_items)} Titik - 4 Foto/Halaman)",
                             data=pdf_bytes,
                             file_name=f"Report_{unit_name}.pdf",
                             mime="application/pdf",
