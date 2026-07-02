@@ -19,14 +19,13 @@ st.set_page_config(page_title="WhatsApp Checklist Report Generator", page_icon="
 
 def parse_chat_file(txt_file, temp_dir_path):
     """
-    STRATEGI BARU: 
-    Hanya memproses baris chat yang file foto fisiknya nyata-nyata ADA di dalam ZIP.
-    Jika user sudah menghapus fotonya secara manual, teks chat-nya otomatis diabaikan.
+    Membaca runtut berbasis state tracking untuk mengunci item secara presisi.
+    Hanya memproses jika file foto fisiknya benar-benar ADA di dalam berkas ZIP.
     """
     checklist_items = []
     seen_images = set()
     
-    # 1. Daftarkan semua file fisik yang benar-benar ada di folder ekstraksi (case-insensitive)
+    # Daftarkan semua file fisik aktif yang benar-benar ada di folder ekstraksi
     existing_files = {f.name.lower(): f.name for f in Path(temp_dir_path).iterdir() if f.is_file()}
     
     with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -39,14 +38,12 @@ def parse_chat_file(txt_file, temp_dir_path):
     current_caption_lines = []
 
     def save_current_item():
-        """Menyimpan item hanya jika file fotonya lolos sensor (ada fisiknya)."""
         nonlocal current_img, current_caption_lines
         if current_img:
             img_lower = current_img.lower()
             
-            # FILTER VALIDASI UTAMA: Cek apakah file fotonya ada di daftar berkas ZIP Anda
+            # Validasi Fisik: Teks diproses HANYA JIKA file gambarnya ada di dalam ZIP
             if img_lower in existing_files and img_lower not in seen_images:
-                # Ambil nama file dengan penulisan huruf besar/kecil yang asli dari folder
                 actual_filename = existing_files[img_lower]
                 img_path = Path(temp_dir_path) / actual_filename
 
@@ -77,13 +74,11 @@ def parse_chat_file(txt_file, temp_dir_path):
 
         img_match = img_pattern.search(clean_line)
         if img_match:
-            # Simpan antrean gambar sebelumnya sebelum membuka gambar baru
             save_current_item()
             current_img = img_match.group(1)
             current_caption_lines = []
         else:
             if current_img:
-                # Bersihkan teks dari nama pengirim jika terikut
                 if " - " in clean_line and ":" in clean_line:
                     if timestamp_pattern.match(clean_line):
                         parts = clean_line.split(":", 2)
@@ -93,7 +88,6 @@ def parse_chat_file(txt_file, temp_dir_path):
                 if clean_line and not "file terlampir" in clean_line.lower():
                     current_caption_lines.append(clean_line)
 
-    # Simpan item terakhir di ujung file
     save_current_item()
     return checklist_items
 
@@ -243,10 +237,55 @@ if uploaded_file is not None:
                     checklist_items = parse_chat_file(txt_files[0], temp_dir_path)
                     
                     if not checklist_items:
-                        st.warning("Peringatan: Tidak ditemukan format foto checklist atau berkas foto fisik Anda kosong.")
+                        st.warning("Peringatan: Tidak ditemukan berkas foto fisik aktif Anda atau ZIP kosong.")
                     else:
-                        # Urutkan A-Z berdasarkan lokasi
-                        checklist_items.sort(key=lambda x: (x['location'].lower(), x['work'].lower()))
+                        # --- LOGIKA SORTING CUSTOM SESUAI PERMINTAAN ---
+                        def custom_sort_key(item):
+                            loc = item['location'].lower()
+                            work = item['work'].lower()
+                            
+                            # 1. Prioritas Utama: Area global / luar tanpa lt1 & lt2
+                            prioritas_utama = [
+                                "all",
+                                "fasad",
+                                "carport",
+                                "teras dpn",
+                                "teras blk",
+                                "halaman blk"
+                            ]
+                            
+                            if loc in prioritas_utama:
+                                return (0, prioritas_utama.index(loc), work)
+                            
+                            # 2. Kelompok Umum tanpa lt1 & lt2 (Dahulukan 'dpn' baru 'blk')
+                            if "lt1" not in loc and "lt2" not in loc:
+                                if "dpn" in loc:
+                                    return (1, 0, loc, work)
+                                if "blk" in loc:
+                                    return (1, 1, loc, work)
+                                return (1, 2, loc, work)
+                            
+                            # 3. Kelompok Lantai 1 (lt1)
+                            if "lt1" in loc:
+                                if "dpn" in loc:
+                                    return (2, 0, loc, work)
+                                if "blk" in loc:
+                                    return (2, 1, loc, work)
+                                return (2, 2, loc, work)
+                            
+                            # 4. Kelompok Lantai 2 (lt2)
+                            if "lt2" in loc:
+                                if "dpn" in loc:
+                                    return (3, 0, loc, work)
+                                if "blk" in loc:
+                                    return (3, 1, loc, work)
+                                return (3, 2, loc, work)
+                                
+                            return (4, 0, loc, work)
+
+                        # Jalankan pengurutan cerdas sesuai urutan kriteria lokasi baru
+                        checklist_items.sort(key=custom_sort_key)
+                        # ------------------------------------------------
                         
                         output_pdf = temp_dir_path / f"Report_{unit_name}.pdf"
                         generate_pdf(output_pdf, checklist_items, unit_name)
